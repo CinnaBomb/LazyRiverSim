@@ -72,7 +72,7 @@ function fallback(id){const g=new T.Group();if(id==='lounger'){for(let i=0;i<11;
 function prop(id,u,offset,rotation=0){const g=place(u,offset,.015);g.rotation.y+=rotation;const placeholder=fallback(id);g.add(placeholder);placements[id].push({g,placeholder});}
 for(const [zi,z] of resortZones.entries()){
  const n=Math.ceil(z.length/1.2);for(let i=0;i<n;i++){const pu=z.u+(i-(n-1)/2)*1.2/length;const g=place(pu,z.side*9.4,-.095);box(g,z.depth,.18,1.23,0,0,0,deckMat);box(g,z.depth,.008,.018,0,.095,.60,groutMat);}
- const chairs=zi===2?6:9;for(let i=0;i<chairs;i++){const pu=z.u+(i-(chairs-1)/2)*1.75/length;prop('lounger',pu,z.side*7.1,z.side*Math.PI/2);if(i%2===0&&i<chairs-1)prop('umbrella',pu+.8/length,z.side*8.9);}
+ const chairs=zi===2?6:9;for(let i=0;i<chairs;i++){const pu=z.u+(i-(chairs-1)/2)*1.75/length;prop('lounger',pu,z.side*7.1,z.side*Math.PI/2);if(i%2===0&&i<chairs-(zi===0?1:0))prop('umbrella',pu+.8/length,z.side*8.9);}
  prop('cabana',z.u,z.side*12.2,z.side*Math.PI/2);if(zi!==0)prop('picnic',z.u+5.5/length,z.side*12.2);
 }
 // Boardwalk on one bank, deliberately clear of the channel.

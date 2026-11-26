@@ -23,4 +23,22 @@ for(const [id,url] of Object.entries({
  towel:'https://cdn.3dassets.dev/assets/28970/v1/model.glb',
  shower:'https://cdn.3dassets.dev/assets/28974/v1/model.glb'
 })){try{const bytes=Buffer.from(await (await get(url)).arrayBuffer());if(bytes.subarray(0,4).toString()!=='glTF')throw Error('Not a GLB');await mkdir('assets/resort',{recursive:true});await writeFile('assets/resort/'+id+'.glb',bytes);report[id]='ok';}catch(e){report[id]=e.message;console.warn(id,e.message);}}
+// Download attributed, web-optimized palms through the provider's documented MCP tool.
+const {spawn}=await import('node:child_process');
+const {mkdtemp,readdir,readFile,rm}=await import('node:fs/promises');
+const {tmpdir}=await import('node:os');
+const {join,resolve}=await import('node:path');
+const {createInterface}=await import('node:readline');
+const palmPicks=[['palm-mature','24bc514ac5e04e56a97fcb9b555aa67d'],['palm-young','2517eb623aea48c4b4cc5e96e1e3f971'],['palm-bart','f34a5b4ccc774d68b9fc51b3e59690db']];
+async function glbs(dir){const result=[];for(const e of await readdir(dir,{withFileTypes:true})){if(e.name==='node_modules'||e.name.startsWith('.'))continue;const p=join(dir,e.name);if(e.isDirectory())result.push(...await glbs(p));else if(e.name.endsWith('.glb'))result.push(p);}return result;}
+const work=await mkdtemp(join(tmpdir(),'lazy-palms-'));
+const child=spawn('npx',['-y','paprika3d','serve'],{cwd:work,stdio:['pipe','pipe','inherit'],env:{...process.env,CI:'true'}});
+let seq=0;const pending=new Map();
+const lines=createInterface({input:child.stdout});
+lines.on('line',line=>{try{const msg=JSON.parse(line),p=pending.get(msg.id);if(p){pending.delete(msg.id);clearTimeout(p.timer);msg.error?p.reject(Error(JSON.stringify(msg.error))):p.resolve(msg.result);}}catch{}});
+function rpc(method,params){return new Promise((resolve,reject)=>{const id=++seq;const timer=setTimeout(()=>{pending.delete(id);reject(Error(method+' timed out'));},90000);pending.set(id,{resolve,reject,timer});child.stdin.write(JSON.stringify({jsonrpc:'2.0',id,method,params})+'\n');});}
+child.on('error',e=>{for(const p of pending.values()){clearTimeout(p.timer);p.reject(e);}pending.clear();});
+try{await rpc('initialize',{protocolVersion:'2024-11-05',capabilities:{},clientInfo:{name:'lazy-river-build',version:'1.0'}});child.stdin.write(JSON.stringify({jsonrpc:'2.0',method:'notifications/initialized'})+'\n');
+for(const [name,pick] of palmPicks){try{const cwd=join(work,name);await mkdir(cwd,{recursive:true});const result=await rpc('tools/call',{name:'asset_search',arguments:{pick,cwd}});if(result?.isError)throw Error(JSON.stringify(result.content));const files=await glbs(cwd);if(files.length!==1)throw Error('Expected one GLB, got '+files.length);const bytes=await readFile(files[0]);if(bytes.subarray(0,4).toString()!=='glTF')throw Error('Invalid GLB');await mkdir('assets/resort',{recursive:true});await writeFile('assets/resort/'+name+'.glb',bytes);report[name]='ok';}catch(e){report[name]=e.message;console.warn(name,e.message);}}
+}catch(e){for(const [name] of palmPicks)report[name]??=e.message;}finally{child.kill();lines.close();await rm(work,{recursive:true,force:true});}
 await mkdir('assets',{recursive:true});await writeFile('assets/report.json',JSON.stringify(report,null,2));console.log(report);

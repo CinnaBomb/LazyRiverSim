@@ -48,9 +48,29 @@ for(const u0 of [.29,.72]){const p=point(u0,5.1),center=point(u0),toward=center.
 const tube=new T.Mesh(new T.TorusGeometry(.83,.25,12,36),new T.MeshPhysicalMaterial({color:0xe2c38c,roughness:.36,clearcoat:.6,clearcoatRoughness:.24}));tube.rotation.x=-Math.PI/2;scene.add(tube);
 
 let u=.025,paused=false,yaw=0,pitch=-.08,drag=false,prev=0,lastX=0,lastY=0;const speed=document.querySelector('#speed'),pause=document.querySelector('#pause');function toggle(){paused=!paused;pause.textContent=paused?'Resume drift':'Pause drift';}pause.onclick=toggle;for(let i=0;i<2;i++){const c=renderer.xr.getController(i);c.addEventListener('select',toggle);rig.add(c);}
+// Hold-to-paddle controls. Current is always downstream; paddle force is relative to water.
+const paddleKeys=new Set(),paddlePointers=new Map();let riverVelocity=Number(speed.value);
+const keyDirections={KeyW:1,ArrowUp:1,KeyS:-1,ArrowDown:-1};
+addEventListener('keydown',e=>{if(!(e.code in keyDirections)||/INPUT|SELECT|TEXTAREA|BUTTON/.test(e.target?.tagName||''))return;e.preventDefault();paddleKeys.add(e.code);});
+addEventListener('keyup',e=>{paddleKeys.delete(e.code);});
+addEventListener('blur',()=>{paddleKeys.clear();paddlePointers.clear();});
+document.addEventListener('visibilitychange',()=>{if(document.hidden){paddleKeys.clear();paddlePointers.clear();}});
+const paddleHud=document.querySelector('#paddleHud'),motionLabel=document.querySelector('#motionLabel');
+for(const button of document.querySelectorAll('[data-paddle]')){
+ const release=e=>{paddlePointers.delete(e.pointerId);if(![...paddlePointers.values()].includes(Number(button.dataset.paddle)))button.classList.remove('held');};
+ button.addEventListener('pointerdown',e=>{e.preventDefault();button.setPointerCapture(e.pointerId);paddlePointers.set(e.pointerId,Number(button.dataset.paddle));button.classList.add('held');});
+ for(const event of ['pointerup','pointercancel','lostpointercapture'])button.addEventListener(event,release);
+ button.addEventListener('contextmenu',e=>e.preventDefault());
+}
+function paddleInput(){let value=0;for(const key of paddleKeys)value+=keyDirections[key];for(const direction of paddlePointers.values())value+=direction;
+ if(renderer.xr.isPresenting){let strongest=0;for(const source of renderer.xr.getSession()?.inputSources||[]){const axes=source.gamepad?.axes;if(!axes||axes.length<2)continue;const y=-(axes.length>=4?axes[3]:axes[1]);if(Math.abs(y)>.18&&Math.abs(y)>Math.abs(strongest))strongest=y;}value+=strongest;}
+ return T.MathUtils.clamp(value,-1,1);
+}
+renderer.xr.addEventListener('sessionstart',()=>{if(paddleHud)paddleHud.hidden=true;paddleKeys.clear();paddlePointers.clear();});
+renderer.xr.addEventListener('sessionend',()=>{if(paddleHud)paddleHud.hidden=false;});
 renderer.domElement.addEventListener('pointerdown',e=>{drag=true;lastX=e.clientX;lastY=e.clientY;renderer.domElement.setPointerCapture(e.pointerId)});renderer.domElement.addEventListener('pointerup',()=>drag=false);renderer.domElement.addEventListener('pointermove',e=>{if(drag&&!renderer.xr.isPresenting){yaw-=(e.clientX-lastX)*.004;pitch=T.MathUtils.clamp(pitch-(e.clientY-lastY)*.004,-1.2,1.2);lastX=e.clientX;lastY=e.clientY;}});
 renderer.xr.addEventListener('sessionstart',()=>{document.querySelector('#panel').open=false;camera.position.set(0,0,0);camera.quaternion.identity();});
-renderer.setAnimationLoop(ms=>{const dt=prev?Math.min(.05,(ms-prev)/1000):0;prev=ms;if(!paused)u=(u+Number(speed.value)*dt/length)%1;water.uniforms.time.value+=dt;cloudMat.uniforms.time.value+=dt;fallMat.uniforms.time.value+=dt;const p=point(u);rig.position.set(p.x,1.12,p.z);sun.target.position.copy(p);sun.position.copy(p).addScaledVector(sunDirection,40);sky.position.copy(rig.position);clouds.position.copy(rig.position);tube.position.set(p.x,.14,p.z);if(!renderer.xr.isPresenting){const t=path.getTangentAt(u);camera.rotation.set(pitch,Math.atan2(-t.x,-t.z)+yaw,0,'YXZ');}renderer.render(scene,camera);});
+renderer.setAnimationLoop(ms=>{const dt=prev?Math.min(.05,(ms-prev)/1000):0;prev=ms;const current=Number(speed.value),paddle=paddleInput(),target=paused?0:current+2.5*paddle;riverVelocity=paused?0:T.MathUtils.lerp(riverVelocity,target,1-Math.exp(-dt*4));if(!paused)u=((u+riverVelocity*dt/length)%1+1)%1;if(motionLabel){const mode=paused?'Paused':paddle>.05?'Downstream':paddle<-.05?'Against current':'Drifting';motionLabel.textContent=mode+' · '+Math.abs(riverVelocity).toFixed(1)+' m/s';}water.uniforms.time.value+=dt;cloudMat.uniforms.time.value+=dt;fallMat.uniforms.time.value+=dt;const p=point(u);rig.position.set(p.x,1.12,p.z);sun.target.position.copy(p);sun.position.copy(p).addScaledVector(sunDirection,40);sky.position.copy(rig.position);clouds.position.copy(rig.position);tube.position.set(p.x,.14,p.z);if(!renderer.xr.isPresenting){const t=path.getTangentAt(u);camera.rotation.set(pitch,Math.atan2(-t.x,-t.z)+yaw,0,'YXZ');}renderer.render(scene,camera);});
 addEventListener('resize',()=>{camera.aspect=innerWidth/innerHeight;camera.updateProjectionMatrix();renderer.setSize(innerWidth,innerHeight);});
 let audio;document.querySelector('#sound').onclick=async(e)=>{if(!audio){audio=new AudioContext();const b=audio.createBuffer(1,audio.sampleRate*4,audio.sampleRate),d=b.getChannelData(0);let last=0;for(let i=0;i<d.length;i++){last=(last+.035*(Math.random()*2-1))/1.035;d[i]=last*3;}const s=audio.createBufferSource();s.buffer=b;s.loop=true;const f=audio.createBiquadFilter();f.type='lowpass';f.frequency.value=850;const gain=audio.createGain();gain.gain.value=.2;s.connect(f).connect(gain).connect(audio.destination);s.start();}else if(audio.state==='running'){await audio.suspend();e.target.textContent='Enable water sounds';return;}await audio.resume();e.target.textContent='Mute water sounds';};
 // Load photographic surfaces when present; keep procedural fallbacks if unavailable.
@@ -111,6 +131,3 @@ shower(.60,-12.5);
 // Low garden planters with distinct blossoms, not spherical canopy placeholders.
 const petalGeo=new T.SphereGeometry(1,9,6),flowerMats=[mat(0xb9344c),mat(0xe38549),mat(0xf0cf76),mat(0xd66c90)],flowerLeaf=mat(0x345c2b);
 for(const [pu,side] of [[.09,1],[.17,1],[.47,-1],[.55,-1],[.79,1],[.86,1],[.92,1]]){const g=place(pu,side*5.8,.02);box(g,1.2,.25,3.1,0,.1,0,plaster);box(g,1.04,.06,2.95,0,.24,0,darkWood);for(let j=0;j<12;j++){const x=(rand()-.5)*.85,z=(rand()-.5)*2.7,h=.3+rand()*.36;const stem=cylinder(g,.013,.018,h,x,.27+h/2,z,flowerLeaf);stem.rotation.z=(rand()-.5)*.18;for(let k=0;k<5;k++){const a=k*Math.PI*2/5,p=new T.Mesh(petalGeo,flowerMats[j%4]);p.position.set(x+Math.cos(a)*.072,.27+h,z+Math.sin(a)*.072);p.scale.set(.11,.025,.055);p.rotation.y=-a;g.add(p);}cylinder(g,.025,.025,.04,x,.29+h,z,flowerMats[2]);for(const sign of [-1,1]){const leafObj=new T.Mesh(broadGeo,flowerLeaf);leafObj.position.set(x,.36,z);leafObj.scale.setScalar(.20);leafObj.rotation.y=sign*Math.PI/2;g.add(leafObj);}}}
-// Two distant low-rise resort wings; balconies and windows break up the mass.
-function lodge(u,offset){const g=place(u,offset,-.15);g.rotation.y+=Math.PI/2;box(g,15,5.2,5.2,0,2.6,0,plaster);roof(g,15.2,5.6,5.2);for(const level of [0,1])for(let i=0;i<6;i++){const x=-6.25+i*2.5,y=.5+level*2.45;box(g,1.4,1.8,.07,x,y+.9,2.64,glass);box(g,2.25,.13,1.1,x,y-.08,3.02,deckMat);for(const xx of [-1.03,1.03])box(g,.08,.83,.08,x+xx,y+.38,3.48,timber);box(g,2.16,.075,.08,x,y+.8,3.48,timber);for(let j=0;j<7;j++)box(g,.045,.72,.045,x-.9+j*.3,y+.4,3.48,timber);}}
-lodge(.13,21);lodge(.51,-22);
